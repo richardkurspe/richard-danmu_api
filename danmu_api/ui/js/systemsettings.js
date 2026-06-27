@@ -345,8 +345,8 @@ async function checkDeployPlatformConfig() {
             missingVars.push('DEPLOY_PLATFROM_TOKEN');
         }
         
-        // 对于netlify和cloudflare部署平台，还需要检查DEPLOY_PLATFROM_ACCOUNT
-        if (deployPlatform.toLowerCase() === 'netlify' || deployPlatform.toLowerCase() === 'cloudflare') {
+        // 对于需要账号ID的部署平台，还需要检查DEPLOY_PLATFROM_ACCOUNT
+        if (['netlify', 'cloudflare', 'huggingface'].includes(deployPlatform.toLowerCase())) {
             if (!deployPlatformAccount || deployPlatformAccount.trim() === '') {
                 missingVars.push('DEPLOY_PLATFROM_ACCOUNT');
             }
@@ -522,6 +522,17 @@ function renderValueInput(item) {
                     }).join('')}
                 </div>
             </div>
+
+            \${currentKey === 'MERGE_SOURCE_PAIRS' ? \`
+            <div style="margin-top: 15px; margin-bottom: 8px;">
+                <button type="button" class="btn btn-primary btn-sm" onclick="fetchAndShowRecentData()">
+                    📊 查看最近数据
+                </button>
+            </div>
+            <div id="recent-data-panel" class="recent-data-panel">
+                <div id="recent-data-list"></div>
+            </div>
+            \` : ''}
         \`;
 
         // 设置拖动事件
@@ -566,8 +577,111 @@ function renderValueInput(item) {
         const currentKey = document.getElementById('env-key') ? document.getElementById('env-key').value : '';
         const isBilibiliCookie = currentKey === 'BILIBILI_COOKIE';
         const isAiApiKey = currentKey === 'AI_API_KEY';
-        
-        if (isAiApiKey) {
+        const isColorPool = currentKey === 'COLOR_POOL';
+        const isDanmuOffset = currentKey === 'DANMU_OFFSET';
+		const isCustomMergeRules = currentKey === 'CUSTOM_MERGE_RULES';
+        const offsetSources = item && item.sources ? item.sources : [];
+
+        if (isColorPool) {
+            // 自定义颜色池专用编辑界面
+            const colors = parseColorPool(value);
+
+            container.innerHTML = \`
+                <label>颜色池配置 (CONVERT_COLOR 为 color 时生效)</label>
+                <div id="color-pool-display" class="color-pool-display">
+                    \${renderColorItems(colors)}
+                </div>
+                <div class="color-pool-picker">
+                    <div class="color-pool-picker-inner">
+                        <div id="color-wheel" class="color-wheel">
+                            <div class="color-wheel-center"></div>
+                            <div id="wheel-dot" class="color-wheel-dot" style="top: 2px; left: 53px; background: hsl(0,100%,50%);"></div>
+                        </div>
+                        <div class="color-pool-preview">
+                            <div id="color-preview-swatch" class="color-pool-preview-swatch" style="background: #ff0000;"></div>
+                            <span id="color-preview-hex" class="color-pool-preview-hex">#ff0000</span>
+                        </div>
+                        <div class="color-pool-lightness">
+                            <span>亮度</span>
+                            <input type="range" id="color-lightness" min="10" max="100" value="50">
+                        </div>
+                        <div class="color-pool-actions">
+                            <button type="button" class="btn btn-primary btn-sm" onclick="addColorToPool()">添加到颜色池</button>
+                            <button type="button" class="btn btn-primary btn-sm" onclick="addRandomColorToPool()">随机添加</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="color-pool-actions">
+                    <button type="button" class="btn btn-primary btn-sm" onclick="showBatchColorDialog()">批量添加</button>
+                    <div class="spacer"></div>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="resetColorPool()">恢复默认</button>
+                </div>
+                <textarea id="text-value" style="display: none;">\${value}</textarea>
+            \`;
+            setTimeout(initColorWheel, 0);
+        } else if (isDanmuOffset) {
+            // DANMU_OFFSET 专用编辑界面
+            const rows = value && value.length > 50 ? Math.min(Math.max(Math.ceil(value.length / 50), 3), 10) : 3;
+            container.innerHTML = \`
+                <label>变量值</label>
+                <textarea id="text-value" placeholder="格式：剧名:秒 或 剧名/S01:秒 或 剧名@来源:秒 或 剧名/S01/E01@来源%:秒" rows="\${rows}" class="text-monospace">\${value}</textarea>
+                <div style="margin-top: 8px; display: flex; gap: 10px;">
+                    <button type="button" class="btn btn-primary btn-sm" id="offset-rule-toggle" onclick="toggleOffsetRulePanel()">
+                        添加规则
+                    </button>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="fetchAndShowRecentData()">
+                        📊 查看最近数据
+                    </button>
+                </div>
+                <div id="recent-data-panel" class="recent-data-panel">
+                    <div class="form-help" style="margin: 0 0 8px 0;">点击下方按钮可快捷填入规则表单：</div>
+                    <div id="recent-data-list"></div>
+                </div>
+                <div id="offset-rule-panel" class="offset-rule-panel">
+                    <div class="form-help" style="margin: 0 0 8px 0;">季和集不填则对所有季/集生效</div>
+                    <div class="offset-form-row">
+                        <div style="flex: 2; min-width: 100px;">
+                            <label class="offset-label">剧名 *</label>
+                            <input type="text" id="offset-anime" class="offset-input" placeholder="例如: overlord">
+                        </div>
+                        <div style="width: 65px;">
+                            <label class="offset-label">季</label>
+                            <input type="number" id="offset-season" class="offset-input" placeholder="" min="1" max="99">
+                        </div>
+                        <div style="width: 65px;">
+                            <label class="offset-label">集</label>
+                            <input type="number" id="offset-episode" class="offset-input" placeholder="" min="1" max="999">
+                        </div>
+                        <div style="width: 85px;">
+                            <label class="offset-label">偏移秒 *</label>
+                            <input type="number" id="offset-seconds" class="offset-input" placeholder="90">
+                        </div>
+                    </div>
+                    <div style="margin-bottom: 10px; display: flex; align-items: center; width: 100%;">
+                        <label class="offset-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin: 0; white-space: nowrap;">
+                            启用百分比模式（按视频时长缩放全部弹幕时间）
+                            <input type="checkbox" id="offset-use-percent" style="width: 16px; height: 16px; margin: 0; flex-shrink: 0;">
+                        </label>
+                    </div>
+                    \${offsetSources.length > 0 ? \`
+                    <div style="margin-bottom: 10px;">
+                        <label class="offset-label">来源 (可选，不选则对所有来源生效)</label>
+                        <div id="offset-sources" class="offset-sources">
+                            \${offsetSources.map(src => \`
+                                <div class="offset-source-tag" data-value="\${src}" onclick="toggleOffsetSource(this)">
+                                    \${src}
+                                </div>
+                            \`).join('')}
+                        </div>
+                    </div>
+                    \` : ''}
+                    <div class="offset-actions">
+                        <button type="button" class="btn btn-sm" onclick="toggleOffsetRulePanel()">取消</button>
+                        <button type="button" class="btn btn-primary btn-sm" onclick="appendOffsetRule()">确认添加</button>
+                    </div>
+                </div>
+            \`;
+        } else if (isAiApiKey) {
             // AI API Key 专用编辑界面
             container.innerHTML = \`
                 <div class="ai-apikey-editor">
@@ -623,6 +737,63 @@ function renderValueInput(item) {
                     });
                 }
             }, 120);
+        } else if (isCustomMergeRules) {
+            // CUSTOM_MERGE_RULES 专用编辑界面
+            const rows = value && value.length > 50 ? Math.min(Math.max(Math.ceil(value.length / 50), 3), 10) : 3;
+            container.innerHTML = \`
+                <label>变量值</label>
+                <textarea id="text-value" placeholder="格式：副源 -> 主源 | 路由规则 或 副源 × 主源" rows="\${rows}" class="text-monospace">\${value || ''}</textarea>
+                <div style="margin-top: 8px; display: flex; gap: 10px;">
+                    <button type="button" class="btn btn-primary btn-sm" id="merge-rule-toggle" onclick="toggleMergeRulePanel()">
+                        添加规则
+                    </button>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="fetchAndShowRecentData()">
+                        📊 查看最近数据
+                    </button>
+                </div>
+                <div id="recent-data-panel" class="recent-data-panel">
+                    <div class="form-help" style="margin: 0 0 8px 0;">点击下方按钮可快捷填入规则表单：</div>
+                    <div id="recent-data-list"></div>
+                </div>
+                <div id="merge-rule-panel" class="offset-rule-panel">
+                    <div class="offset-form-row">
+                        <div style="flex: 1; min-width: 120px;">
+                            <label class="offset-label">副源实体（副源剧名@源）</label>
+                            <input type="text" id="merge-sec-entity" class="offset-input" placeholder="例: 我推的孩子/S01@bahamut" onfocus="setMergeFocus('sec')">
+                        </div>
+                        <div style="width: 60px;">
+                            <label class="offset-label" style="text-align: center; display: block;">关系</label>
+                            <select id="merge-action" class="offset-input" onchange="onMergeActionChange()" style="cursor: pointer; padding: 6px; text-align: center; font-weight: bold; font-size: 14px;">
+                                <option value="->">-&gt;</option>
+                                <option value="×">×</option>
+                            </select>
+                            <div id="merge-action-hint" style="font-size: 11px; color: #666; text-align: center; margin-top: 4px;">合并</div>
+                        </div>
+                        <div style="flex: 1; min-width: 120px;">
+                            <label class="offset-label">主源实体（主源剧名@源）</label>
+                            <input type="text" id="merge-prim-entity" class="offset-input" placeholder="例: 我推的孩子/S03@dandan" onfocus="setMergeFocus('prim')">
+                        </div>
+                    </div>
+                    <div class="offset-form-row" id="merge-route-row">
+                        <div style="flex: 1;">
+                            <label class="offset-label">集数路由规则 (选填，可多组。例如: E01>E01,E25~E35>E25~E35)</label>
+                            <input type="text" id="merge-route-rule" class="offset-input" placeholder="留空则交由系统自动计算偏移">
+                        </div>
+                    </div>
+                    <div style="margin-bottom: 10px;">
+                        <label class="offset-label">快速追加来源至当前聚焦的输入框 (没有 @ 则追加 @xxx，已存在 @ 则追加 &xxx 合并写法)</label>
+                        <div class="offset-sources">
+                            \${offsetSources.map(src => \`
+                                <div class="offset-source-tag" onclick="appendSourceToMerge('\${src}')">\${src}</div>
+                            \`).join('')}
+                        </div>
+                    </div>
+                    <div class="offset-actions">
+                        <button type="button" class="btn btn-sm" onclick="toggleMergeRulePanel()">取消</button>
+                        <button type="button" class="btn btn-primary btn-sm" onclick="appendMergeRule()">确认添加</button>
+                    </div>
+                </div>
+            \`;
         } else if (value && value.length > 50) {
             const rows = Math.min(Math.max(Math.ceil(value.length / 50), 3), 10);
             container.innerHTML = \`
@@ -636,6 +807,420 @@ function renderValueInput(item) {
             \`; 
         }
     }
+}
+
+// ===== 颜色池操作函数 =====
+
+// 色轮状态
+let wheelHue = 0;
+let wheelLightness = 50;
+let wheelCleanup = null;
+
+// 解析颜色池字符串为十进制数组
+function parseColorPool(str) {
+    if (!str) return [];
+    return str.split(',').map(c => parseInt(c.trim(), 10)).filter(c => !isNaN(c) && c >= 0 && c <= 16777215);
+}
+
+// 渲染颜色池色块 HTML
+function renderColorItems(colors) {
+    if (colors.length === 0) return '<span class="color-pool-empty">未配置，将使用默认颜色池</span>';
+    return colors.map((c, i) => \`
+        <div class="color-pool-item">
+            <span class="color-pool-swatch" style="background: #\${c.toString(16).padStart(6, '0')};"></span>
+            <span class="color-pool-value">\${c}</span>
+            <button type="button" class="color-pool-remove" onclick="removeColorFromPool(\${i})">&times;</button>
+        </div>
+    \`).join('');
+}
+
+// HSL -> RGB -> 十进制
+function hslToDecimal(h, s, l) {
+    s /= 100;
+    l /= 100;
+    const k = n => (n + h / 30) % 12;
+    const a = s * Math.min(l, 1 - l);
+    const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
+    const r = Math.round(f(0) * 255);
+    const g = Math.round(f(8) * 255);
+    const b = Math.round(f(4) * 255);
+    return (r << 16) | (g << 8) | b;
+}
+
+// 更新色轮预览
+function updateWheelPreview() {
+    const dec = hslToDecimal(wheelHue, 100, wheelLightness);
+    const hex = '#' + dec.toString(16).padStart(6, '0');
+    const swatch = document.getElementById('color-preview-swatch');
+    const hexLabel = document.getElementById('color-preview-hex');
+    const dot = document.getElementById('wheel-dot');
+    if (swatch) swatch.style.background = hex;
+    if (hexLabel) hexLabel.textContent = hex;
+    if (dot) dot.style.background = hex;
+}
+
+// 初始化色轮交互
+function initColorWheel() {
+    if (wheelCleanup) wheelCleanup();
+
+    const wheel = document.getElementById('color-wheel');
+    const slider = document.getElementById('color-lightness');
+    if (!wheel) return;
+
+    let dragging = false;
+
+    function handleWheelEvent(e) {
+        const rect = wheel.getBoundingClientRect();
+        const cx = rect.width / 2;
+        const cy = rect.height / 2;
+        const x = e.clientX - rect.left - cx;
+        const y = e.clientY - rect.top - cy;
+        const dist = Math.sqrt(x * x + y * y);
+        const outerR = rect.width / 2;
+        const innerR = outerR * 0.22;
+        if (dist < innerR || dist > outerR) return;
+        let angle = Math.atan2(y, x) * 180 / Math.PI + 90;
+        if (angle < 0) angle += 360;
+        wheelHue = Math.round(angle % 360);
+        const dot = document.getElementById('wheel-dot');
+        if (dot) {
+            const r = (innerR + outerR) / 2;
+            const rad = (wheelHue - 90) * Math.PI / 180;
+            dot.style.left = (cx + r * Math.cos(rad) - 7) + 'px';
+            dot.style.top = (cy + r * Math.sin(rad) - 7) + 'px';
+        }
+        updateWheelPreview();
+    }
+
+    const onMove = e => {
+        if (dragging) handleWheelEvent(e);
+    };
+    const onTouchMove = e => {
+        if (dragging) handleWheelEvent(e.touches[0]);
+    };
+    const onUp = () => {
+        dragging = false;
+    };
+
+    wheel.addEventListener('mousedown', e => {
+        dragging = true;
+        handleWheelEvent(e);
+    });
+    wheel.addEventListener('touchstart', e => {
+        dragging = true;
+        handleWheelEvent(e.touches[0]);
+        e.preventDefault();
+    }, { passive: false });
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('touchmove', onTouchMove, { passive: false });
+    document.addEventListener('mouseup', onUp);
+    document.addEventListener('touchend', onUp);
+
+    if (slider) {
+        slider.addEventListener('input', function() {
+            wheelLightness = parseInt(this.value, 10);
+            updateWheelPreview();
+        });
+    }
+
+    wheelCleanup = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('touchmove', onTouchMove);
+        document.removeEventListener('mouseup', onUp);
+        document.removeEventListener('touchend', onUp);
+        wheelCleanup = null;
+    };
+
+    updateWheelPreview();
+}
+
+// 颜色池 - 追加颜色值
+function appendColorToPool(decimal) {
+    const textarea = document.getElementById('text-value');
+    const current = textarea.value.trim();
+    textarea.value = current ? current + ',' + decimal : String(decimal);
+    syncColorPoolDisplay();
+}
+
+// 颜色池 - 从色轮添加
+function addColorToPool() {
+    appendColorToPool(hslToDecimal(wheelHue, 100, wheelLightness));
+}
+
+// 颜色池 - 随机添加（crypto 真随机）
+function addRandomColorToPool() {
+    const arr = new Uint32Array(1);
+    crypto.getRandomValues(arr);
+    appendColorToPool(arr[0] % 16777216);
+}
+
+// 颜色池 - 删除指定颜色
+function removeColorFromPool(index) {
+    const textarea = document.getElementById('text-value');
+    const colors = textarea.value.split(',').map(c => c.trim()).filter(c => c);
+    colors.splice(index, 1);
+    textarea.value = colors.join(',');
+    syncColorPoolDisplay();
+}
+
+// 颜色池 - 恢复默认（清空值，后端默认值自动生效）
+function resetColorPool() {
+    const textarea = document.getElementById('text-value');
+    textarea.value = '';
+    syncColorPoolDisplay();
+}
+
+// 颜色池 - 同步色块展示
+function syncColorPoolDisplay() {
+    const textarea = document.getElementById('text-value');
+    const display = document.getElementById('color-pool-display');
+    if (!textarea || !display) return;
+    display.innerHTML = renderColorItems(parseColorPool(textarea.value));
+}
+
+// 颜色池 - 批量添加弹窗
+function showBatchColorDialog() {
+    const overlay = document.createElement('div');
+    overlay.id = 'batch-color-overlay';
+    overlay.className = 'batch-color-overlay';
+    overlay.innerHTML = \`
+        <div class="batch-color-dialog">
+            <div style="font-size: 15px; font-weight: 600; margin-bottom: 12px;">批量添加颜色</div>
+            <div class="form-help" style="margin: 0 0 10px 0;">支持十进制（如 16777215）和十六进制（如 #ffffff），逗号分隔</div>
+            <textarea id="batch-color-input" class="batch-color-input" placeholder="例如: #ff0000, 65280, #0000ff, 16776960" rows="4"></textarea>
+            <div id="batch-color-preview" class="batch-color-preview"></div>
+            <div class="batch-color-actions">
+                <button type="button" class="btn btn-sm" onclick="closeBatchColorDialog()">取消</button>
+                <button type="button" class="btn btn-primary btn-sm" onclick="confirmBatchColor()">确认添加</button>
+            </div>
+        </div>
+    \`;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', function(e) {
+        if (e.target === overlay) closeBatchColorDialog();
+    });
+    const input = document.getElementById('batch-color-input');
+    if (input) input.addEventListener('input', updateBatchColorPreview);
+}
+
+// 颜色池 - 关闭批量弹窗
+function closeBatchColorDialog() {
+    const overlay = document.getElementById('batch-color-overlay');
+    if (overlay) overlay.remove();
+}
+
+// 颜色池 - 解析单个颜色值（支持十进制和 #hex）
+function parseColorValue(raw) {
+    const s = raw.trim();
+    if (!s) return NaN;
+    if (s.startsWith('#')) {
+        const hex = s.slice(1);
+        if (/^[0-9a-fA-F]{3}$/.test(hex)) {
+            const full = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+            return parseInt(full, 16);
+        }
+        if (/^[0-9a-fA-F]{6}$/.test(hex)) {
+            return parseInt(hex, 16);
+        }
+        return NaN;
+    }
+    const n = parseInt(s, 10);
+    if (isNaN(n) || n < 0 || n > 16777215) return NaN;
+    return n;
+}
+
+// 颜色池 - 批量预览
+function updateBatchColorPreview() {
+    const input = document.getElementById('batch-color-input');
+    const preview = document.getElementById('batch-color-preview');
+    if (!input || !preview) return;
+    const parts = input.value.split(',');
+    const html = parts.map(raw => {
+        const c = parseColorValue(raw);
+        if (isNaN(c)) return '';
+        return \`<span class="batch-color-preview-swatch" style="background: #\${c.toString(16).padStart(6, '0')};"></span>\`;
+    }).filter(Boolean).join('');
+    preview.innerHTML = html || '<span class="color-pool-empty">输入颜色后预览</span>';
+}
+
+// 颜色池 - 确认批量添加
+function confirmBatchColor() {
+    const input = document.getElementById('batch-color-input');
+    if (!input) return;
+    const parts = input.value.split(',');
+    const valid = parts.map(raw => parseColorValue(raw)).filter(c => !isNaN(c));
+    if (valid.length === 0) {
+        customAlert('未识别到有效颜色值');
+        return;
+    }
+    const textarea = document.getElementById('text-value');
+    const current = textarea.value.trim();
+    const newVal = valid.map(String).join(',');
+    textarea.value = current ? current + ',' + newVal : newVal;
+    syncColorPoolDisplay();
+    closeBatchColorDialog();
+}
+
+// DANMU_OFFSET 快速配置 - 切换规则面板
+function toggleOffsetRulePanel() {
+    const panel = document.getElementById('offset-rule-panel');
+    if (panel) {
+        const isHidden = getComputedStyle(panel).display === 'none';
+        panel.style.display = isHidden ? 'block' : 'none';
+        const btn = document.getElementById('offset-rule-toggle');
+        if (btn) btn.textContent = isHidden ? '收起' : '添加规则';
+    }
+}
+
+// DANMU_OFFSET 快速配置 - 切换来源选中状态
+function toggleOffsetSource(el) {
+    el.classList.toggle('selected');
+}
+
+// DANMU_OFFSET 快速配置 - 确认添加规则
+function appendOffsetRule() {
+    const anime = document.getElementById('offset-anime').value.trim();
+    const season = document.getElementById('offset-season').value.trim();
+    const episode = document.getElementById('offset-episode').value.trim();
+    const seconds = document.getElementById('offset-seconds').value.trim();
+    const usePercent = !!document.getElementById('offset-use-percent')?.checked;
+
+    if (!anime) {
+        customAlert('请输入剧名');
+        return;
+    }
+    if (!seconds) {
+        customAlert('请输入偏移秒数');
+        return;
+    }
+    if (episode && !season) {
+        customAlert('指定集时需要同时指定季');
+        return;
+    }
+
+    let path = anime;
+    if (season) {
+        path += '/S' + season.padStart(2, '0');
+        if (episode) {
+            path += '/E' + episode.padStart(2, '0');
+        }
+    }
+
+    const sourcesEl = document.getElementById('offset-sources');
+    if (sourcesEl) {
+        const selectedSources = Array.from(sourcesEl.querySelectorAll('.offset-source-tag.selected'))
+            .map(el => el.dataset.value);
+        if (selectedSources.length > 0) {
+            path += '@' + selectedSources.join('&');
+        }
+    }
+
+    if (usePercent) {
+        path += '%';
+    }
+
+    const rule = path + ':' + seconds;
+    const textarea = document.getElementById('text-value');
+    const current = textarea.value.trim();
+    textarea.value = current ? current + ',' + rule : rule;
+
+    document.getElementById('offset-anime').value = '';
+    document.getElementById('offset-season').value = '';
+    document.getElementById('offset-episode').value = '';
+    document.getElementById('offset-seconds').value = '';
+    const usePercentEl = document.getElementById('offset-use-percent');
+    if (usePercentEl) {
+        usePercentEl.checked = false;
+    }
+    if (sourcesEl) {
+        sourcesEl.querySelectorAll('.offset-source-tag.selected').forEach(el => {
+            el.classList.remove('selected');
+        });
+    }
+    toggleOffsetRulePanel();
+}
+
+// CUSTOM_MERGE_RULES 快速配置 - 焦点状态记录
+let currentMergeFocus = 'sec';
+
+function setMergeFocus(type) {
+    currentMergeFocus = type;
+}
+
+// CUSTOM_MERGE_RULES 快速配置 - 快捷追加来源
+function appendSourceToMerge(source) {
+    const inputId = currentMergeFocus === 'sec' ? 'merge-sec-entity' : 'merge-prim-entity';
+    const inputEl = document.getElementById(inputId);
+    if (!inputEl) return;
+
+    let val = inputEl.value.trim();
+    if (val.includes('@')) {
+        val += '&' + source;
+    } else {
+        val += '@' + source;
+    }
+    inputEl.value = val;
+    inputEl.focus(); // 保持焦点，方便用户连续点击多个来源
+}
+
+// CUSTOM_MERGE_RULES 快速配置 - 切换规则面板
+function toggleMergeRulePanel() {
+    const panel = document.getElementById('merge-rule-panel');
+    if (panel) {
+        const isHidden = getComputedStyle(panel).display === 'none';
+        panel.style.display = isHidden ? 'block' : 'none';
+        const btn = document.getElementById('merge-rule-toggle');
+        if (btn) btn.textContent = isHidden ? '收起' : '添加规则';
+    }
+}
+
+// CUSTOM_MERGE_RULES 快速配置 - 切换操作符联动
+function onMergeActionChange() {
+    const action = document.getElementById('merge-action').value;
+    const routeRow = document.getElementById('merge-route-row');
+    const hint = document.getElementById('merge-action-hint');
+
+    if (action === '×') {
+        if (routeRow) routeRow.style.display = 'none';
+        if (hint) hint.textContent = '阻断';
+    } else {
+        if (routeRow) routeRow.style.display = 'flex';
+        if (hint) hint.textContent = '合并';
+    }
+}
+
+// CUSTOM_MERGE_RULES 快速配置 - 确认添加规则
+function appendMergeRule() {
+    const secEntity = document.getElementById('merge-sec-entity').value.trim();
+    const action = document.getElementById('merge-action').value;
+    const primEntity = document.getElementById('merge-prim-entity').value.trim();
+    const routeRule = document.getElementById('merge-route-rule').value.trim();
+
+    if (!secEntity || !primEntity) {
+        customAlert('副源实体和主源实体不能为空');
+        return;
+    }
+
+    let rule = secEntity + ' ' + action + ' ' + primEntity;
+    if (action === '->' && routeRule) {
+        rule += ' | ' + routeRule;
+    }
+
+    const textarea = document.getElementById('text-value');
+    const current = textarea.value.trim();
+
+    if (current && !current.endsWith(';')) {
+        textarea.value = current + ';' + rule;
+    } else {
+        textarea.value = current ? current + rule : rule;
+    }
+
+    // 清空表单
+    document.getElementById('merge-sec-entity').value = '';
+    document.getElementById('merge-prim-entity').value = '';
+    document.getElementById('merge-route-rule').value = '';
+
+    toggleMergeRulePanel();
 }
 
 // 调整数字
@@ -1488,6 +2073,9 @@ document.getElementById('env-form').addEventListener('submit', async function(e)
     const key = document.getElementById('env-key').value.trim();
     const description = document.getElementById('env-description').value.trim();
     const type = document.getElementById('value-type').value;
+    const existingItem = editingKey !== null && envVariables[currentCategory]
+        ? envVariables[currentCategory][editingKey]
+        : null;
 
     // 根据类型获取值
     let value, itemData;
@@ -1569,7 +2157,10 @@ document.getElementById('env-form').addEventListener('submit', async function(e)
             }
 
             if (editingKey !== null) {
-                envVariables[currentCategory][editingKey] = itemData;
+                envVariables[currentCategory][editingKey] = {
+                    ...(existingItem || {}),
+                    ...itemData
+                };
                 addLog(\`更新配置项: \${key} = \${value}\`, 'success');
             } else {
                 envVariables[category].push(itemData);
@@ -1594,7 +2185,7 @@ document.getElementById('env-form').addEventListener('submit', async function(e)
     } catch (error) {
         addLog(\`更新环境变量失败: \${error.message}\`, 'error');
         addLog(\`❌ 更新环境变量失败: \${error.message}\`, 'error');
-        customAlert(result.message + '，请检查部署平台相关环境变量配置是否正确');
+        customAlert(error.message + '，请检查部署平台相关环境变量配置是否正确');
     }
 });
 
@@ -1882,6 +2473,353 @@ async function verifyAiConnection() {
         // 恢复按钮状态
         btn.innerHTML = originalText;
         btn.disabled = false;
+    }
+}
+
+/* ========================================
+   最近数据与animes缓存面板功能
+   ======================================== */
+
+// 统一切换卡片内的折叠区域
+function toggleCardSection(btnEl, targetSelector, openText, closeText) {
+    if (!btnEl) return;
+    const card = btnEl.closest('.anime-cache-card');
+    if (!card) return;
+    const container = card.querySelector(targetSelector);
+    if (!container) return;
+
+    const isHidden = window.getComputedStyle(container).display === 'none';
+
+    if (isHidden) {
+        container.style.display = 'flex';
+        btnEl.innerHTML = closeText;
+        btnEl.classList.add('active');
+    } else {
+        container.style.display = 'none';
+        btnEl.innerHTML = openText;
+        btnEl.classList.remove('active');
+    }
+}
+
+// 切换子节点内的映射详情
+function toggleMapping(btnEl) {
+    if (!btnEl) return;
+    const parentItem = btnEl.closest('.anime-cache-child-item');
+    if (!parentItem) return;
+    const container = parentItem.querySelector('.child-mapping-container');
+    if (!container) return;
+
+    const isHidden = window.getComputedStyle(container).display === 'none';
+    if (isHidden) {
+        container.style.display = 'flex';
+        btnEl.innerHTML = '📊 收起映射详情';
+        btnEl.classList.add('active');
+    } else {
+        container.style.display = 'none';
+        btnEl.innerHTML = '📊 展开映射详情';
+        btnEl.classList.remove('active');
+    }
+}
+
+// 快捷数据面板业务逻辑
+async function fetchAndShowRecentData() {
+    const panel = document.getElementById('recent-data-panel');
+    const listContainer = document.getElementById('recent-data-list');
+
+    if (!panel || !listContainer) return;
+
+    if (window.getComputedStyle(panel).display !== 'none') {
+        panel.style.display = 'none';
+        return;
+    }
+
+    panel.style.display = 'block';
+    listContainer.innerHTML = '<span class="loading-spinner-small"></span> 数据加载中...';
+
+    try {
+        const response = await fetch(buildApiUrl('/api/cache/animes', true));
+        const result = await response.json();
+
+        if (result.success && result.data && result.data.length > 0) {
+            renderAnimeCachePanel(result.data, listContainer);
+        } else {
+            listContainer.innerHTML = '<div class="text-gray font-size-12" style="padding: 10px 0;">缓存中暂无番剧数据，请先通过客户端请求弹幕接口以生成缓存。</div>';
+        }
+    } catch (error) {
+        listContainer.innerHTML = \`<div class="text-red font-size-12">请求失败: \${error.message}</div>\`;
+    }
+}
+
+// 渲染animes缓存面板 (含集数解析与映射详情)
+function renderAnimeCachePanel(data, listContainer) {
+    const keyInput = document.getElementById('env-key');
+
+    if (!listContainer || !keyInput) return;
+
+    const currentKey = keyInput.value;
+
+    // 内部辅助函数：生成操作按钮
+    const generateButtons = (title, source) => {
+        if (currentKey === 'CUSTOM_MERGE_RULES') {
+            return \`
+                <button type="button" class="btn btn-sm btn-xs" onclick="fillMergeEntity('sec', '\${title}', '\${source}')">设为副</button>
+                <button type="button" class="btn btn-sm btn-primary btn-xs" onclick="fillMergeEntity('prim', '\${title}', '\${source}')">设为主</button>
+            \`;
+        } else if (currentKey === 'DANMU_OFFSET') {
+            return \`
+                <button type="button" class="btn btn-sm btn-primary btn-xs" onclick="fillOffsetEntity('\${title}', '\${source}')">填入</button>
+            \`;
+        }
+        return '';
+    };
+
+    // 内部辅助函数：清洗标题
+    const cleanTitleStr = (rawTitle) => rawTitle.replace(/\\s*from\\s+.*$/i, '').trim().replace(/'/g, '&apos;');
+
+    let html = '<div class="anime-cache-list">';
+
+    data.forEach(item => {
+        const cleanTitle = cleanTitleStr(item.animeTitle);
+        const coverStyle = item.imageUrl ? \`background-image: url('\${item.imageUrl}');\` : '';
+
+        // 1. 构建合并子源模块
+        let childrenHtml = '';
+        let childrenCount = 0;
+        if (item.mergedChildren && item.mergedChildren.length > 0) {
+            childrenCount = item.mergedChildren.length;
+            const childItems = item.mergedChildren.map(child => {
+                const childCleanTitle = cleanTitleStr(child.animeTitle);
+
+                const childCoverStyle = child.imageUrl ? \`background-image: url('\${child.imageUrl}');\` : '';
+
+                // 解析映射数据并按匹配状态排序
+                let mappingHtml = '';
+                if (item.links && item.links.length > 0) {
+                    const parsedRows = [];
+
+                    item.links.forEach((link, idx) => {
+                        const urlStr = String(link.url || '');
+                        const hasMainMatch = urlStr.includes(item.source + ':') || !urlStr.includes(':');
+                        const hasChildMatch = urlStr.includes(child.source + ':');
+
+                        if (!hasMainMatch && !hasChildMatch) return;
+
+                        let mainSide = '(主源越界)';
+                        if (hasMainMatch) {
+                            const cleanMainEpTitle = (link.title || '未知剧集').replace(/^【.*?】\\s*/, '').replace(/'/g, '&apos;').replace(/"/g, '&quot;');
+                            mainSide = \`【\${item.source}】\${cleanMainEpTitle}\`;
+                        }
+
+                        let childSide = '(副源缺失)';
+                        let childNum = NaN;
+
+                        if (hasChildMatch) {
+                            const regex = new RegExp(child.source + ':([^$]+)');
+                            const match = urlStr.match(regex);
+                            let childTitleStr = '(源ID未知)';
+
+                            if (match) {
+                                const childId = match[1];
+                                childTitleStr = \`(源ID: \${childId})\`;
+
+                                if (child.links && child.links.length > 0) {
+                                    const childLink = child.links.find(l => String(l.url) === String(childId));
+                                    if (childLink && childLink.title) {
+                                        childTitleStr = childLink.title.replace(/^【.*?】\\s*/, '').replace(/'/g, '&apos;').replace(/"/g, '&quot;');
+                                    }
+                                }
+                            } else {
+                                childTitleStr = (link.title || '').replace(/^【.*?】\\s*/, '').replace(/'/g, '&apos;').replace(/"/g, '&quot;');
+                            }
+                            childSide = \`【\${child.source}】\${childTitleStr}\`;
+                            
+                            const numMatch = childTitleStr.match(/\\d+/);
+                            if (numMatch) {
+                                childNum = parseInt(numMatch[0], 10);
+                            }
+                        }
+
+                        let rowHtml = '';
+                        if (hasMainMatch && hasChildMatch) {
+                            rowHtml = \`<div class="mapping-row"><span class="mapping-status success">✓ 匹配</span> <span class="mapping-text">\${mainSide} ↔ \${childSide}</span></div>\`;
+                        } else {
+                            rowHtml = \`<div class="mapping-row"><span class="mapping-status warning">✗ 落单</span> <span class="mapping-text">\${mainSide} ↔ \${childSide}</span></div>\`;
+                        }
+
+                        parsedRows.push({
+                            originalIndex: idx,
+                            hasChildMatch: hasChildMatch,
+                            childNum: childNum,
+                            html: rowHtml
+                        });
+                    });
+
+                    const matchedRows = parsedRows.filter(r => r.hasChildMatch).sort((a, b) => {
+                        if (!isNaN(a.childNum) && !isNaN(b.childNum)) {
+                            return a.childNum - b.childNum;
+                        }
+                        return a.originalIndex - b.originalIndex;
+                    });
+
+                    const lonelyRows = parsedRows.filter(r => !r.hasChildMatch).sort((a, b) => a.originalIndex - b.originalIndex);
+
+                    const finalRows = [...matchedRows, ...lonelyRows];
+                    const mappingRowsHtml = finalRows.map(r => r.html).join('');
+
+                    if (mappingRowsHtml) {
+                        mappingHtml = \`
+                            <div class="child-mapping-toggle" onclick="toggleMapping(this)">📊 展开映射详情</div>
+                            <div class="child-mapping-container">
+                                \${mappingRowsHtml}
+                            </div>
+                        \`;
+                    }
+                }
+
+                return \`
+                    <div class="anime-cache-child-item">
+                        <div class="anime-cache-child-main">
+                            <div class="anime-cache-child-cover" style="\${childCoverStyle}"></div>
+                            <div class="anime-cache-child-info">
+                                <div class="anime-cache-child-title" title="\${child.animeTitle}">\${childCleanTitle}</div>
+                                <div class="anime-cache-meta">[\${child.source}] (\${child.episodes}集)</div>
+                            </div>
+                            <div class="anime-cache-child-actions">
+                                \${generateButtons(childCleanTitle, child.source)}
+                            </div>
+                        </div>
+                        \${mappingHtml}
+                    </div>
+                \`;
+            }).join('');
+
+            childrenHtml = \`
+                <div class="merged-children-container">
+                    \${childItems}
+                </div>
+            \`;
+        }
+
+        // 2. 构建剧集参考列表模块
+        let episodesHtml = '';
+        let episodesCount = 0;
+        if (item.links && item.links.length > 0) {
+            episodesCount = item.links.length;
+            const epItems = item.links.map(link => {
+                const safeTitle = link.title ? link.title.replace(/'/g, '&apos;').replace(/"/g, '&quot;') : '未知剧集';
+                return \`
+                    <div class="anime-cache-child-item" style="padding: 6px;">
+                        <div class="anime-cache-child-main">
+                            <div class="anime-cache-child-info">
+                                <div class="anime-cache-child-title" title="\${safeTitle}">\${safeTitle}</div>
+                            </div>
+                        </div>
+                    </div>
+                \`;
+            }).join('');
+
+            episodesHtml = \`
+                <div class="episodes-list-container">
+                    \${epItems}
+                </div>
+            \`;
+        }
+
+        // 3. 构建卡片底部专属切换栏 (Tab Bar)
+        let footerHtml = '';
+        if (childrenCount > 0 || episodesCount > 0) {
+            let badges = '';
+            if (episodesCount > 0) {
+                badges += \`<div class="cache-badge badge-episodes" onclick="toggleCardSection(this, '.episodes-list-container', '📺 \${episodesCount} 个剧集', '📺 收起剧集')">📺 \${episodesCount} 个剧集</div>\`;
+            }
+            if (childrenCount > 0) {
+                badges += \`<div class="cache-badge badge-sources" onclick="toggleCardSection(this, '.merged-children-container', '🔗 \${childrenCount} 个被合并源', '🔗 收起被合并源')">🔗 \${childrenCount} 个被合并源</div>\`;
+            }
+            footerHtml = \`<div class="anime-cache-footer">\${badges}</div>\`;
+        }
+
+        // 4. 组装完整卡片
+        html += \`
+            <div class="anime-cache-card">
+                <div class="anime-cache-card-body">
+                    <div class="anime-cache-cover" style="\${coverStyle}"></div>
+                    <div class="anime-cache-info">
+                        <div class="anime-cache-title" title="\${item.animeTitle}">\${cleanTitle}</div>
+                        <div class="anime-cache-meta">[\${item.source}] (\${item.episodes}集)</div>
+                    </div>
+                    <div class="anime-cache-actions">
+                        \${generateButtons(cleanTitle, item.source)}
+                    </div>
+                </div>
+                \${footerHtml}
+                \${childrenHtml}
+                \${episodesHtml}
+            </div>
+        \`;
+    });
+
+    html += '</div>';
+    listContainer.innerHTML = html;
+}
+
+/* ========================================
+   表单填充快捷操作功能
+   ======================================== */
+
+// 内部辅助函数：输入框视觉反馈统一处理
+function applyInputFeedback(inputEl) {
+    if (!inputEl) return;
+    const oldBorder = inputEl.style.borderColor;
+    inputEl.style.borderColor = '#28a745';
+    setTimeout(() => inputEl.style.borderColor = oldBorder, 800);
+    inputEl.focus();
+}
+
+// 表单填充逻辑：合并映射表
+function fillMergeEntity(type, title, source) {
+    const panel = document.getElementById('merge-rule-panel');
+    if (panel && window.getComputedStyle(panel).display === 'none') {
+        toggleMergeRulePanel();
+    }
+
+    const inputId = type === 'sec' ? 'merge-sec-entity' : 'merge-prim-entity';
+    const inputEl = document.getElementById(inputId);
+
+    if (inputEl) {
+        inputEl.value = \`\${title}@\${source}\`;
+        applyInputFeedback(inputEl);
+        setMergeFocus(type);
+    }
+}
+
+// 表单填充逻辑：弹幕偏移
+function fillOffsetEntity(title, source) {
+    const panel = document.getElementById('offset-rule-panel');
+    if (panel && window.getComputedStyle(panel).display === 'none') {
+        toggleOffsetRulePanel();
+    }
+
+    // 视图层数据清洗：去除年份和类型后缀
+    const cleanTitle = title
+        .replace(/[\\u200B-\\u200F\\uFEFF]/g, '')
+        .replace(/\\s*[（(〔\\[]\\s*[0-9０-９]{4}\\s*年?\\s*[）)〕\\]]/g, '') 
+        .replace(/(.+?)\\s*【[^】]+】$/, '$1')
+        .trim();
+
+    const inputEl = document.getElementById('offset-anime');
+
+    if (inputEl) {
+        inputEl.value = cleanTitle;
+
+        // 基于 data-value 属性匹配并选中对应来源标签
+        const sourceTags = document.querySelectorAll('#offset-sources .offset-source-tag');
+        if (sourceTags.length > 0) {
+            sourceTags.forEach(el => el.classList.remove('selected'));
+            const targetTag = Array.from(sourceTags).find(el => el.dataset.value === source);
+            if (targetTag) targetTag.classList.add('selected');
+        }
+
+        applyInputFeedback(inputEl);
     }
 }
 `;
